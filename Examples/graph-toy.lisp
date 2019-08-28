@@ -47,7 +47,8 @@
                       (lambda ()
                         (truncate (setf current (+ current w-step))))))
          (fn-y (lambda (y)
-                      (+ (- height (truncate (* h-step (+ y (- minimum))))) 50))))
+		 (+ (- height (truncate (* h-step (+ y (- minimum))))) 50)
+		 )))
 
     ;; Draw the title
     (draw-text* pane (format nil "~a" (title frame))
@@ -69,7 +70,8 @@
               (let ((xpos (funcall step-fn-x))
                     (ypos (funcall fn-y yval)))
                 (when (draw-values frame)
-                  (clim:draw-text* pane (format nil "~a" yval) (- xpos 20) ypos))
+                  (clim:draw-text* pane (format nil "~a" yval) (- xpos 20) ypos)
+		  )
                 (when (not (eq acc nil))
                   (draw-line* pane (car acc) (cdr acc) xpos ypos))
                 (cons xpos ypos)))
@@ -81,7 +83,7 @@
    (title :initform "Clim Example Graph" :initarg :title :accessor title)
    (max-xvals :initform 50 :initarg :max-xvals :accessor max-xvals)
    (last-yval :initform 20 :accessor last-yval)
-   (draw-values :initform t :initarg :draw-values :accessor draw-values))
+   (draw-values :documentation "If value is t draws value next to point" :initform t :initarg :draw-values :accessor draw-values))
   (:default-initargs
     :width 800
     :height 600)
@@ -97,23 +99,25 @@
   ((val :initarg :val :accessor val)))
 
 (defmethod handle-event ((frame graph-toy) (event new-value-event))
-  (vector-push-extend (val event) (val-array frame))
-  (let ((val-array-len (length (val-array frame)))
-        (xval-count (max-xvals frame)))
+  (vector-push-extend (val event) (val-array frame));;push value of event to val-array
+  (let ((val-array-len (length (val-array frame))) ;;how many values are there
+        (xval-count (max-xvals frame)) ;;how many values fit in the graph
+	(event-freq 0.25);;interval between events in seconds
+	)
     (when (>= val-array-len (* xval-count 2))
       (loop
-         for i from 0 to (- xval-count 1)
-         for j from (- val-array-len xval-count)
-         do (setf (elt (val-array frame) i) (elt (val-array frame) j)))
+         for i from 0 to (- xval-count 1);; loop through xval indexes
+         for j from (- val-array-len xval-count);;loop indefinitely from 
+         do (setf (elt (val-array frame) i) (elt (val-array frame) j)));; copy values to the beginning
       (setf (fill-pointer (val-array frame)) xval-count))
     (redisplay-frame-pane frame 'main-display)
-    (incf (last-yval frame) (- (random 9) 4))
+    (incf (last-yval frame) (- 1 (random (+ 1 (- 2 -1)))));;increment frame's last-yval. this is the next value drawn
     (when (member (frame-state frame) '(:enabled :shrunk))
       (schedule-event (frame-top-level-sheet frame)
                       (make-instance 'new-value-event
                                      :sheet frame
                                      :val (last-yval frame))
-                      0.5))))
+                      event-freq))))
 
 (defmethod run-frame-top-level :before ((graph graph-toy) &key)
   (let* ((sheet (frame-top-level-sheet graph))
