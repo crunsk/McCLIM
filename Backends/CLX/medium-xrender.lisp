@@ -48,15 +48,24 @@
   (call-next-method))
 
 
+;;; XXX: CLX decorates lines for us. When we do it ourself this should be
+;;; adjusted. For details see CLIM 2, Part 4, Section 12.4.1. -- jd 2019-01-31
+
 (defmethod clim:medium-draw-line* ((medium clx-render-medium) x1 y1 x2 y2)
   (call-next-method))
 
 (defmethod clim:medium-draw-lines* ((medium clx-render-medium) coord-seq)
   (call-next-method))
 
+;;; XXX: all MEDIUM-DRAW-FOO* methods with "filled" argument should be in fact
+;;; dispatched somewhere else from the DRAW-FOO* for the path rendering
+;;; (MEDIUM-DRAW-LINES* and MEDIUM-DRAW-ELLIPSE* vs MEDIUM-DRAW-RECTANGLE* and
+;;; MEDIUM-DRAW-AREA*. This will require going through all defined backends and
+;;; purging "extra" arguments. -- jd 2019-01-31
+
 
 (defmethod clim:medium-draw-polygon* ((medium clx-render-medium) coord-seq closed filled)
-  (call-next-method))
+  (call-next-method medium coord-seq closed filled))
 
 
 (defun medium-draw-rectangle-xrender (medium x1 y1 x2 y2 filled)
@@ -86,19 +95,20 @@
                                           (max 0 (min #xFFFF (- x2 x1)))
                                           (max 0 (min #xFFFF (- y2 y1)))))))))))
 
-#+ (or) ;; this causes regressions (i.e in draggable graph)
 (defmethod clim:medium-draw-rectangle* ((medium clx-render-medium) left top right bottom filled)
-  (unless filled
-    (return-from clim:medium-draw-rectangle*
+  #- (or)
+  (call-next-method medium left top right bottom filled)
+  #+ (or) ;; this causes regressions (i.e in draggable graph)
+  (if filled
+      (typecase (medium-ink medium)
+        ((or climi::uniform-compositum clim:color clim:opacity)
+         (medium-draw-rectangle-xrender medium left top right bottom filled))
+        (otherwise
+         (call-next-method)))
       (call-next-method)))
-  (typecase (medium-ink medium)
-    ((or climi::uniform-compositum clim:color clim:opacity)
-     (medium-draw-rectangle-xrender medium left top right bottom filled))
-    (otherwise
-     (call-next-method))))
 
 (defmethod clim:medium-draw-rectangles* ((medium clx-render-medium) position-seq filled)
-  (call-next-method))
+  (call-next-method medium position-seq filled))
 
 
 (defmethod clim:medium-draw-ellipse* ((medium clx-render-medium) center-x center-y
@@ -161,28 +171,10 @@
   (when (alexandria:emptyp string)
     (return-from clim:medium-draw-text*))
   (with-clx-graphics () medium
-    (unless (eq align-y :baseline)
-      (let* ((font (climb:text-style-to-font (port medium) (medium-text-style medium)))
-             (ascent (climb:font-ascent font))
-             (descent (climb:font-descent font))
-             (text-height (+ ascent descent)))
-        (setq y (ecase align-y
-                  (:top (+ y ascent))                              ; OK
-                  #+ (or) (:baseline y)                            ; OK
-                  (:center (+ y ascent (- (/ text-height 2.0s0)))) ; See :around for multiline
-                  (:baseline* y)                                   ; See :around for multiline
-                  (:bottom (- y descent))))))                      ; See :around for multiline
-    (unless (eq align-x :left)
-      ;; This is the worst case - we need to compute whole text width what
-      ;; requires walking all lines char-by char.
-      (let ((text-width (text-size medium string :start start :end end)))
-        (setq x (- (- x 0.5) (ecase align-x
-                               ;;(:left 0)
-                               (:center (/ text-width 2.0s0))
-                               (:right text-width))))))
     (clim-sys:with-lock-held (*draw-font-lock*)
       (mcclim-font:draw-glyphs medium mirror gc x y string
                                :start start :end end
+                               :align-x align-x :align-y align-y
                                :translate #'translate
                                :transformation (sheet-device-transformation (medium-sheet medium))
                                :transform-glyphs transform-glyphs))))

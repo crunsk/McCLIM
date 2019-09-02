@@ -31,7 +31,7 @@
   ())
 
 (defclass clx-port (clim-xcommon:keysym-port-mixin
-		    clx-text-selection-port-mixin
+                    clx-selection-mixin
 		    clx-basic-port)
   ((color-table :initform (make-hash-table :test #'eq))
 
@@ -47,7 +47,7 @@
     (let* (; this code courtesy telent-clx.
            (slash-i (or (position #\/ name) -1))
            (colon-i (position #\: name :start (1+ slash-i)))
-           (decnet-colon-p (eql (elt name (1+ colon-i)) #\:))
+           (decnet-colon-p (and colon-i (eql (elt name (1+ colon-i)) #\:)))
            (host (subseq name (1+ slash-i) colon-i))
            (dot-i (and colon-i (position #\. name :start colon-i)))
            (display (and colon-i
@@ -193,7 +193,8 @@
                                        event-mask))))
       (port-register-mirror (port sheet) sheet window)
       (when map
-        (xlib:map-window window))))
+        (xlib:map-window window)
+        (xlib:display-finish-output (clx-port-display port)))))
   (port-lookup-mirror port sheet))
 
 (defmethod realize-mirror ((port clx-port) (sheet mirrored-sheet-mixin))
@@ -213,38 +214,27 @@
 				    :structure-notify)
                       :map (sheet-enabled-p sheet)))
 
-(defmethod %realize-mirror ((port clx-port) (sheet top-level-sheet-pane))
-  (let ((q (compose-space sheet))
-        (frame (pane-frame sheet)))
-    (let ((window (realize-mirror-aux
-                   port sheet
-                   :map nil
-                   :width (round-coordinate (space-requirement-width q))
-                   :height (round-coordinate (space-requirement-height q))))
-	  (name (frame-pretty-name frame)))
-      (setf (xlib:wm-hints window) (xlib:make-wm-hints :input :on))
-      (setf (xlib:wm-name window) name)
-      (unless (exactly-encodable-as-string-p name)
-        (xlib:change-property window
-                              :_NET_WM_NAME
-                              (utf8-string-encode (map 'vector #'char-code name))
-                              :UTF8_STRING 8))
-      (setf (xlib:wm-icon-name window) name)
-      (unless (exactly-encodable-as-string-p name)
-        (xlib:change-property window
-                              :_NET_WM_ICON_NAME
-                              (utf8-string-encode (map 'vector #'char-code name))
-                              :UTF8_STRING 8))
-      (xlib:set-wm-class
-       window
-       (string-downcase (frame-name frame))
-       (string-capitalize (frame-name frame)))
-      (setf (xlib:wm-protocols window) `(:wm_delete_window))
-      (xlib:change-property window
-                            :WM_CLIENT_LEADER (list (xlib:window-id window))
-                            :WINDOW 32))))
+(defmethod %realize-mirror ((port clx-port) (sheet top-level-sheet-mixin))
+  (let* ((q (compose-space sheet))
+         (window (realize-mirror-aux
+                  port sheet
+                  :map nil
+                  :width (round-coordinate (space-requirement-width q))
+                  :height (round-coordinate (space-requirement-height q))))
+         (name (clime:sheet-name sheet))
+         (instance-name (string-downcase name))
+         (class-name (string-capitalize name))
+         (pretty-name (clime:sheet-pretty-name sheet)))
+    (xlib:set-wm-class window instance-name class-name)
+    (%set-window-name window pretty-name)
+    (%set-window-icon-name window pretty-name)
+    (setf (xlib:wm-hints window) (xlib:make-wm-hints :input :on))
+    (setf (xlib:wm-protocols window) `(:wm_take_focus :wm_delete_window))
+    (xlib:change-property window
+                          :WM_CLIENT_LEADER (list (xlib:window-id window))
+                          :WINDOW 32)))
 
-(defmethod %realize-mirror ((port clx-port) (sheet unmanaged-top-level-sheet-pane))
+(defmethod %realize-mirror ((port clx-port) (sheet unmanaged-sheet-mixin))
   (realize-mirror-aux port sheet
 		      :override-redirect :on
                       :save-under :on
@@ -273,8 +263,6 @@
 				    :button-motion
 				    :owner-grab-button)
                       :map (sheet-enabled-p sheet)))
-
-
 
 (defmethod port-motion-hints ((port clx-port) (sheet mirrored-sheet-mixin))
   (let ((event-mask (xlib:window-event-mask (sheet-direct-xmirror sheet))))
@@ -336,6 +324,9 @@
 
 (defmethod destroy-mirror ((port clx-port) (pixmap pixmap))
   (alexandria:when-let ((mirror (port-lookup-mirror port pixmap)))
+    (when-let ((picture (find-if (alexandria:of-type 'xlib::picture)
+                                 (xlib:pixmap-plist mirror))))
+      (xlib:render-free-picture picture))
     (xlib:free-pixmap mirror)
     (port-unregister-mirror port pixmap mirror)))
 
@@ -356,7 +347,7 @@
 ;; Top-level-sheet
 
 ;; this is evil.
-(defmethod allocate-space :after ((pane top-level-sheet-pane) width height)
+(defmethod allocate-space :after ((pane top-level-sheet-mixin) width height)
   (when (sheet-direct-xmirror pane)
     (with-slots (space-requirement) pane
       '(setf (xlib:wm-normal-hints (sheet-direct-xmirror pane))

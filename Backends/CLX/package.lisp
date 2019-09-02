@@ -12,7 +12,9 @@
 	   #:x-keysym-to-clim-modifiers))
 
 (defpackage :clim-clx
-    (:use :clim :clim-lisp :clim-backend)
+  (:use :clim :clim-lisp :clim-backend)
+  (:import-from :alexandria
+                #:when-let*)
   (:import-from :climi
                 #:+alt-key+
                 ;;
@@ -23,7 +25,7 @@
                 #:port-grafts
 		#:%%sheet-native-transformation
 		#:%%set-sheet-native-transformation
-		#:device-transformation	
+		#:device-transformation
                 ;;
                 #:clamp
                 #:get-environment-variable
@@ -34,13 +36,15 @@
                 #:map-repeated-sequence
                 #:pixmap-mirror
 		#:do-sequence
-                #:with-double-buffering 
+                #:with-double-buffering
                 #:with-transformed-position
                 #:with-transformed-positions
                 #:with-medium-options
                 ;;
                 #:border-pane
                 #:pixmap
+                #:top-level-sheet-mixin
+                #:unmanaged-sheet-mixin
                 #:top-level-sheet-pane
                 #:unmanaged-top-level-sheet-pane
                 #:menu-frame
@@ -58,15 +62,17 @@
                 ;; classes
                 #:mirrored-pixmap
                 #:window-destroy-event
-                #:pointer-ungrab-event
+                #:pointer-ungrab-leave-event
+                #:pointer-ungrab-enter-event
 		#:pointer-motion-hint-event
                 #:device-font-text-style
                 ;; utils
-                #:dolines)
+                #:dolines
+                #:maybe-funcall
+                #:when-let
+                #:if-let)
   (:import-from #:climi
-		#:standard-event-port-mixin
-		#:standard-graft
-		#:pointer-grab-sheet
+                #:event-listen-or-wait
 		#:%sheet-mirror-region
                 #:%sheet-mirror-transformation
 		#:standard-port)

@@ -1,6 +1,4 @@
-(in-package :clim-demo)
-
-(in-package #:clim-demo)
+(cl:in-package #:clim-demo)
 
 (define-application-frame av-test ()
   ((own-window-p :initform nil))
@@ -22,7 +20,7 @@
 						    "yes")))))
       (clim:radio-box-current-selection "no")
       "yes"))
-   (interactor :interactor)
+   (interactor :interactor :min-width 600)
    (doc :pointer-documentation))
   (:layouts
    (defaults
@@ -61,6 +59,8 @@
     (present '(com-accept-popup) 'command :stream pane)
     (fresh-line pane)
     (present '(com-accepting-with-list-pane-view) 'command :stream pane)
+    (fresh-line pane)
+    (present '(com-accepting-with-gadgets) 'command :stream pane)
     (fresh-line pane)))
 
 (define-av-test-command (com-refresh
@@ -149,3 +149,10 @@
     (format t "Result: ~S~%" (multiple-value-list (accepting-with-list-pane-view :ow own-window-p))))
   (finish-output *standard-output*))
 
+(define-av-test-command (com-accepting-with-gadgets
+			 :name t
+			 :menu nil)
+    ()
+  (with-slots (own-window-p) clim:*application-frame*
+    (format t "Result: ~S~%" (multiple-value-list (accepting-with-gadgets :ow own-window-p))))
+  (finish-output *standard-output*))

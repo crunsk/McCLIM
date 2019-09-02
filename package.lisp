@@ -1617,15 +1617,14 @@
    #:+list-pane-view+                   ;constant
    #:option-pane-view                   ;class
    #:+option-pane-view+                 ;constant
-   #:pointer-input-rectangle            ;function (in franz user guide)
-   #:pointer-input-rectangle*           ;function (in franz user guide)
-   #:pointer-place-rubber-band-line*    ;function (in franz user guide)
    #:port-modifier-state		;generic function (in franz user guide)
    #:port-pointer			;generic function (in franz user guide)
    #:push-button-view                   ;class
    #:+push-button-view+                 ;constant
    #:radio-box-view                     ;class
    #:+radio-box-view+                   ;class
+   #:check-box-view                     ;class
+   #:+check-box-view+                   ;class
    #:read-bitmap-file                   ;function
    #:slider-view                        ;slider-view
    #:+slider-view+                      ;constant
@@ -1868,15 +1867,22 @@
    #:condition-notify
    ;;
    #:defgeneric*
-   #:defmethod* ) )
+   #:defmethod*))
 
 (defpackage :clim-extensions
   (:use)
   (:nicknames :clime)
   (:export
    ;; events
-   #:event-read-with-timeout #:schedule-event
+   #:event-read-with-timeout
+   #:event-listen-or-wait
+   #:schedule-event
    ;; sheets
+   #:top-level-sheet-mixin
+   #:unmanaged-sheet-mixin
+   #:sheet-name
+   #:sheet-pretty-name
+
    #:always-repaint-background-mixin
    #:never-repaint-background-mixin
    #:background
@@ -1914,8 +1920,15 @@
    #:draw-rounded-rectangle*
 
    #:highlight-output-record-tree
-   #:cut-and-paste-mixin
+   #:text-selection-mixin
    #:mouse-wheel-scroll-mixin
+   ;; page abstraction (seos mixin)
+   #:stream-cursor-initial-position
+   #:stream-cursor-final-position
+   #:stream-page-region
+   #:stream-text-margins
+   #:with-temporary-margins
+   #:invoke-with-temporary-page
    ;; designs and patterns
    #:pattern
    #:image-pattern
@@ -1951,12 +1964,22 @@
    #:unsupported-bitmap-format
    #:bitmap-format
    #:*default-vertical-scroll-bar-position*
-
+   ;; frame manager
    #:find-frame-type
+   #:note-frame-pretty-name-changed
    ;; images
    #:rgb-image
    #:xpm-parse-file
-   #:*xpm-x11-colors*))
+   #:*xpm-x11-colors*
+   ;; selection
+   #:define-selection-translator
+   #:release-selection
+   #:publish-selection
+   #:request-selection
+   ;; franz
+   #:pointer-place-rubber-band-line*
+   #:pointer-input-rectangle*
+   #:pointer-input-rectangle))
 
 ;;; Symbols that must be defined by a backend.
 ;;;
@@ -1968,7 +1991,6 @@
   (:use :clim :clim-extensions)
   (:export
    ;; Originally in CLIM-INTERNALS
-   #:get-next-event
    #:make-graft
    #:medium-draw-circle*
    #:medium-draw-glyph
@@ -1980,13 +2002,16 @@
    #:port-force-output
    #:port-frame-keyboard-input-focus
    #:port-grab-pointer
+   #:port-ungrab-pointer
+   #:with-pointer-grabbed
    #:port-motion-hints
+   #:port-set-mirror-name
    #:port-set-mirror-region
    #:port-set-mirror-transformation
-   #:port-ungrab-pointer
    #:queue-callback
    #:set-sheet-pointer-cursor
    #:synthesize-pointer-motion-event
+   #:window-manager-focus-event
    ;; Text-style
    #:text-style-to-font
    #:text-style-character-width
@@ -2060,23 +2085,18 @@
    #:text-style-height
    #:text-style-mapping
    #:text-style-width
-   ;; Text selection protocol
-   #:selection-owner
-   #:selection-timestamp
-   #:selection-event
-   #:selection-clear-event
-   #:selection-notify-event
-   #:selection-request-event
-   #:selection-event-requestor
-   #:request-selection
-   #:release-selection
-   #:bind-selection
-   #:send-selection
-   #:get-selection-from-event
    ;; CLIM-EXTENSIONS
    #:medium-miter-limit
    #:medium-draw-glyph
-   #:medium-draw-circle*))
+   #:medium-draw-circle*
+   ;; selection
+   #:release-selection
+   #:publish-selection
+   #:request-selection
+   #:selection-object
+   #:selection-object-content
+   #:selection-object-type
+   #:selection-object-owner))
 
 (defpackage :clim-internals
   (:use :clim :clim-sys :clim-extensions :clim-backend :clim-lisp)

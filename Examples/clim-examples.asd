@@ -21,7 +21,6 @@
      (:file "sliderdemo")
      (:file "tabledemo")
      (:file "image-transform-demo")
-     (:file "demodemo")
      (:file "stream-test")
      (:file "presentation-test")
      (:file "dragndrop")
@@ -49,7 +48,13 @@
      (:file "flipping-ink")
      (:file "patterns-overlap")
      (:file "text-transformation-test")
-     (:file "text-multiline-positioning")))
+     (:file "text-multiline-positioning")
+     (:file "indentation")
+     (:file "selection")
+     (:file "frame-sheet-name-test")
+     (:file "dnd-commented")
+     (:file "tracking-pointer")
+     (:file "demodemo")))
 
 (defsystem #:clim-examples/superapp
   :depends-on (#:mcclim #:bordeaux-threads)

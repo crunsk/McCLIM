@@ -1,6 +1,6 @@
 ;;; -*- Mode: Lisp; Syntax: Common-Lisp; Package: MCCLIM-TRUETYPE; -*-
 ;;; ---------------------------------------------------------------------------
-;;;     Title: Font matrics, caching, and XRender text support 
+;;;     Title: Font matrics, caching, and XRender text support
 ;;;   Created: 2003-05-25 16:32
 ;;;    Author: Gilbert Baumann <unk6@rz.uni-karlsruhe.de>
 ;;;   License: LGPL (See file COPYING for details).
@@ -185,14 +185,14 @@ Disabling fixed width optimization for this font. ~A vs ~A" font dx fixed-width)
 
 (defun gcontext-picture (drawable gcontext)
   (flet ((update-foreground (picture)
-           ;; FIXME! This makes assumptions about pixel format, and breaks 
+           ;; FIXME! This makes assumptions about pixel format, and breaks
            ;; on e.g. 16 bpp displays.
            ;; It would be better to store xrender-friendly color values in
-           ;; medium-gcontext, at the same time we set the gcontext 
+           ;; medium-gcontext, at the same time we set the gcontext
            ;; foreground. That way we don't need to know the pixel format.
            (let ((fg (the xlib:card32 (xlib:gcontext-foreground gcontext))))
              (xlib::render-fill-rectangle picture
-                                          :src                                          
+                                          :src
                                           (list (ash (ldb (byte 8 16) fg) 8)
                                                 (ash (ldb (byte 8 8) fg) 8)
                                                 (ash (ldb (byte 8 0) fg) 8)
@@ -202,7 +202,7 @@ Disabling fixed width optimization for this font. ~A vs ~A" font dx fixed-width)
            (picture-info
             (or (getf (xlib:gcontext-plist gcontext) 'picture)
                 (setf (getf (xlib:gcontext-plist gcontext) 'picture)
-                      (let* ((pixmap (xlib:create-pixmap 
+                      (let* ((pixmap (xlib:create-pixmap
                                       :drawable drawable
                                       :depth (xlib:drawable-depth drawable)
                                       :width 1 :height 1))
@@ -226,7 +226,9 @@ Disabling fixed width optimization for this font. ~A vs ~A" font dx fixed-width)
 ;;; different next elements. (byte 16 0) is the character code and (byte 16 16)
 ;;; is the next character code. For standalone glyphs (byte 16 16) is zero.
 (defun mcclim-font:draw-glyphs (medium mirror gc x y string
-                                &key start end translate direction
+                                &key start end
+                                  align-x align-y
+                                  translate direction
                                   transformation transform-glyphs
                                 &aux (font (climb:text-style-to-font
                                             (port medium) (medium-text-style medium))))
@@ -246,12 +248,29 @@ Disabling fixed width optimization for this font. ~A vs ~A" font dx fixed-width)
 
   (when (and transform-glyphs
              (not (clim:translation-transformation-p transformation)))
+    (setq string (subseq string start end))
+    (ecase align-x
+      (:left)
+      (:center (let ((origin-x (climb:text-size medium string :text-style (medium-text-style medium))))
+                 (decf x (/ origin-x 2.0))))
+      (:right  (let ((origin-x (climb:text-size medium string :text-style (medium-text-style medium))))
+                 (decf x origin-x))))
+    (ecase align-y
+      (:top (incf y (climb:font-ascent font)))
+      (:baseline)
+      (:center (let* ((ascent (climb:font-ascent font))
+                      (descent (climb:font-descent font))
+                      (height (+ ascent descent))
+                      (middle (- ascent (/ height 2.0s0))))
+                 (incf y middle)))
+      (:baseline*)
+      (:bottom (decf y (climb:font-descent font))))
     (return-from mcclim-font:draw-glyphs
-      (%render-transformed-glyphs font string x y transformation mirror gc)))
+      (%render-transformed-glyphs font string x y align-x align-y transformation mirror gc)))
 
-  (multiple-value-setq (x y) (clim:transform-position transformation x y))
   (let ((glyph-ids (clx-truetype-font-%buffer% font))
-        (glyph-set (display-the-glyph-set (xlib:drawable-display mirror))))
+        (glyph-set (display-the-glyph-set (xlib:drawable-display mirror)))
+        (origin-x 0))
     (loop
        with char = (char string start)
        with i* = 0
@@ -266,9 +285,32 @@ Disabling fixed width optimization for this font. ~A vs ~A" font dx fixed-width)
                (the (unsigned-byte 32) (font-glyph-id font code)))
          (setf char next-char)
          (incf i*)
+         (incf origin-x (climb:font-glyph-dx font code))
        finally
          (setf (aref (the (simple-array (unsigned-byte 32)) glyph-ids) i*)
-               (the (unsigned-byte 32) (font-glyph-id font (char-code char)))))
+               (the (unsigned-byte 32) (font-glyph-id font (char-code char))))
+         (incf origin-x (climb:font-glyph-dx font (char-code char))))
+
+
+    (multiple-value-bind (new-x new-y) (clim:transform-position transformation x y)
+      (setq x (ecase align-x
+                (:left (truncate (+ new-x 0.5)))
+                (:center (truncate (+ (- new-x (/ origin-x 2.0)) 0.5)))
+                (:right  (truncate (+ (- new-x origin-x)         0.5)))))
+      (setq y (ecase align-y
+                (:top       (truncate (+ new-y (climb:font-ascent font) 0.5)))
+                (:baseline  (truncate (+ new-y 0.5)))
+                (:center    (let* ((ascent (climb:font-ascent font))
+                                   (descent (climb:font-descent font))
+                                   (height (+ ascent descent))
+                                   (middle (- ascent (/ height 2.0s0))))
+                              (truncate (+ new-y middle 0.5))))
+                (:baseline* (truncate (+ new-y 0.5)))
+                (:bottom    (truncate (+ new-y (- (climb:font-descent font)) 0.5)))))
+      (unless (and (typep x '(signed-byte 16))
+                   (typep y '(signed-byte 16)))
+        (warn "Trying to render string outside the mirror.")
+        (return-from mcclim-font:draw-glyphs)))
 
     (destructuring-bind (source-picture source-pixmap) (gcontext-picture mirror gc)
       (declare (ignore source-pixmap))
@@ -281,14 +323,14 @@ Disabling fixed width optimization for this font. ~A vs ~A" font dx fixed-width)
       (xlib::render-composite-glyphs (drawable-picture mirror)
                                      glyph-set
                                      source-picture
-                                     (truncate (+ x 0.5))
-                                     (truncate (+ y 0.5))
+                                     x y
                                      glyph-ids
                                      :end (- end start)))))
 
 ;;; Transforming glyphs is very inefficient because we don't cache them.
-(defun %render-transformed-glyphs (font string x y tr mirror gc
+(defun %render-transformed-glyphs (font string x y align-x align-y tr mirror gc
                                    &aux (end (length string)))
+  (declare (ignore align-x align-y))
   ;; Sync the picture-clip-mask with that of the gcontext.
   (when-let ((clip (xlib::gcontext-clip-mask gc)))
     (unless (eq (xlib::picture-clip-mask (drawable-picture mirror)) clip))
@@ -402,7 +444,7 @@ The following files should exist:~&~{  ~A~^~%~}"
             (setf (fontconfig-font-name-device-name font-name)
                   (make-device-font-text-style
                    port
-                   (make-truetype-device-font-name 
+                   (make-truetype-device-font-name
                     :font-file (find-fontconfig-font
                                 (format nil "~A-~A~{:~A~}"
                                         (namestring (fontconfig-font-name-string font-name))
@@ -427,13 +469,9 @@ The following files should exist:~&~{  ~A~^~%~}"
                                     (or *truetype-font-path* "")))))))
            (if (and font-path (probe-file font-path))
                (make-truetype-font port font-path size)
-               ;; We could error here, but we want to fallback to
-               ;; fonts provided by CLX server. Its better to have
-               ;; ugly fonts than none at all.
-               (or (call-next-method)
-                   (error 'missing-font
-                          :filename font-path
-                          :text-style text-style)))))
+               (error 'missing-font
+                      :filename font-path
+                      :text-style text-style))))
        (find-font ()
          (multiple-value-call #'find-and-make-truetype-font
            (clim:text-style-components text-style))))

@@ -15,8 +15,8 @@
 ;;; Library General Public License for more details.
 ;;;
 ;;; You should have received a copy of the GNU Library General Public
-;;; License along with this library; if not, write to the 
-;;; Free Software Foundation, Inc., 59 Temple Place - Suite 330, 
+;;; License along with this library; if not, write to the
+;;; Free Software Foundation, Inc., 59 Temple Place - Suite 330,
 ;;; Boston, MA  02111-1307  USA.
 
 (in-package :clim-internals)
@@ -223,19 +223,20 @@ designator) inherits menu items."
 
 (make-command-table 'user-command-table)
 
-(defmacro define-command-table (name &key inherit-from menu inherit-menu)
-  `(let ((old-table (gethash ',name *command-tables* nil))
-	 (inherit-from-arg (or ',inherit-from '(global-command-table))))
-     (if old-table
-	 (with-slots (inherit-from menu) old-table
-	   (setq inherit-from inherit-from-arg
-		 menu (menu-items-from-list ',menu))
-	   old-table)
-	 (make-command-table ',name
-			     :inherit-from inherit-from-arg
-                             :inherit-menu ,inherit-menu
-			     :menu ',menu
-			     :errorp nil))))
+(defmacro define-command-table (name &key (inherit-from '(global-command-table))
+                                          (menu nil menu-supplied-p)
+                                          inherit-menu)
+  `(if-let ((old-table (gethash ',name *command-tables* nil)))
+     (with-slots (inherit-from menu) old-table
+       (setq inherit-from ',inherit-from)
+       ,(when menu-supplied-p
+          `(setq menu (menu-items-from-list ',menu)))
+       old-table)
+     (make-command-table ',name
+			 :inherit-from ',inherit-from
+                         :inherit-menu ,inherit-menu
+			 :menu ',menu
+			 :errorp nil)))
 
 (defun remove-command-from-command-table (command-name
 					  command-table
@@ -245,7 +246,7 @@ designator) inherits menu items."
     (if (null item)
 	(when errorp
 	  (error 'command-not-present :command-table-name (command-table-name command-table)))
-	(progn 
+	(progn
 	  (when (typep item '%menu-item)
 	    (remove-menu-item-from-command-table table
 						 (command-menu-item-name item)
@@ -260,7 +261,7 @@ designator) inherits menu items."
 				     &key name menu keystroke (errorp t)
 				     (menu-command (and menu
 							`(,command-name))))
-  
+
   (let ((table (find-command-table command-table))
 	(name (cond ((stringp name)
 		     name)
@@ -300,7 +301,7 @@ designator) inherits menu items."
 	  (setf (gethash name (command-line-names table)) command-name))
 	(when menu
 	  (%add-menu-item table item after))))))
-						  
+
 
 (defun apply-with-command-table-inheritance (fun command-table)
   (funcall fun command-table)
@@ -629,7 +630,7 @@ examine the type of the command menu item to see if it is
                           (declare (ignore foo))
                           *unsupplied-argument-marker*)
                       (required-args parser))))))
-  
+
 ;;; XXX The spec says that GESTURE may be a gesture name, but also that the
 ;;; default test is event-matches-gesture-name-p.  Uh...
 
@@ -672,7 +673,7 @@ examine the type of the command menu item to see if it is
 		      :initarg :argument-unparser)
    (required-args :accessor required-args :initarg :required-args)
    (keyword-args :accessor keyword-args :initarg :keyword-args))
-  
+
   (:documentation "A container for a command's parsing functions and
   data for unparsing"))
 
@@ -753,7 +754,7 @@ examine the type of the command menu item to see if it is
     (return-from make-key-acceptors nil))
   (setq keyword-args (mapcar #'(lambda (arg)
 				 (cons (make-keyword (car arg)) (cdr arg)))
-			     keyword-args))  
+			     keyword-args))
   (let ((key-possibilities (gensym "KEY-POSSIBILITIES"))
 	(member-ptype (gensym "MEMBER-PTYPE"))
 	(key-result (gensym "KEY-RESULT"))
@@ -793,9 +794,9 @@ examine the type of the command menu item to see if it is
 			  keyword-args))))
 	       (setq ,key-results (list* ,key-result
 					 ,val-result
-					 ,key-results)))	     
+					 ,key-results)))
 	     (eat-delimiter-or-activator))))
-       
+
        ,key-results)))
 
 (defun make-argument-accept-fun (name required-args keyword-args)
@@ -896,7 +897,7 @@ examine the type of the command menu item to see if it is
 	 for (arg ptype-form) in key-args
 	 for arg-key = (make-keyword arg)
 	 collect `(,arg-key
-		   
+
 		   (format ,stream "~C:~A~C"
 			   ,seperator
 			   ,(keyword-arg-name-from-symbol arg)
@@ -941,7 +942,7 @@ examine the type of the command menu item to see if it is
 							  ".~A-ARG~D."
 							  command-name
 							  arg-index)
-						  (symbol-package name))))
+						  (symbol-package command-name))))
 		     (multiple-value-bind (gesture translator-options)
 			 (if (listp gesture)
 			     (values (car gesture) (cdr gesture))
@@ -1232,7 +1233,7 @@ examine the type of the command menu item to see if it is
     ;; commands to work ] works really badly if (frame-command-table
     ;; *application-frame*) is set/bound to the dispatching
     ;; command-table itself.
-    ;; 
+    ;;
     ;; Instead we now use the knowledge of how disabled commands are
     ;; implemented to satisfy the constraint that only enabeled
     ;; commands are acceptable (with the "accessible" constraint being
@@ -1371,49 +1372,6 @@ examine the type of the command menu item to see if it is
 
 (defparameter +null-command+ '(com-null-command))
 
-(defclass presentation-command-translator (presentation-translator)
-  ()
-  (:documentation "Wraps the tester function with a test that
-  determines if the command is enabled."))
-
-(defmethod initialize-instance :after ((obj presentation-command-translator)
-				       &key tester command-name)
-  (setf (slot-value obj 'tester)
-	#'(lambda (&rest args)
-	    (if (command-enabled command-name *application-frame*)
-		(when tester
-		  (apply tester args))
-		nil))))
-
-(defmacro define-presentation-to-command-translator 
-    (name (from-type command-name command-table &key
-	   (gesture :select)
-	   (tester 'default-translator-tester)
-	   (documentation nil documentationp)
-	   (pointer-documentation (command-name-from-symbol command-name))
-	   (menu t)
-	   (priority 0)
-	   (echo t))
-     arglist
-     &body body)
-  (let ((command-args (gensym "COMMAND-ARGS")))
-    `(define-presentation-translator ,name
-	 (,from-type (command :command-table ,command-table) ,command-table
-		     :gesture ,gesture
-		     :tester ,tester
-		     :tester-definitive t
-		     ,@(and documentationp `(:documentation ,documentation))
-		     :pointer-documentation ,pointer-documentation
-		     :menu ,menu
-		     :priority ,priority
-		     :translator-class presentation-command-translator
-		     :command-name ',command-name)
-       ,arglist
-       (let ((,command-args (let () ,@body)))
-	 (values (cons ',command-name ,command-args)
-		 '(command :command-table ,command-table)
-		 '(:echo ,echo))))))
-
 (defun command-name (command)
   (first command))
 
@@ -1546,4 +1504,3 @@ examine the type of the command menu item to see if it is
 	      (accept 'form :stream stream :view view :prompt nil :history 'command-or-form)))
       (t
        (funcall (cdar *input-context*) object type event options)))))
-

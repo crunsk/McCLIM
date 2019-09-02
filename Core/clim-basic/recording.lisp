@@ -368,28 +368,31 @@ recording stream. If it is T, *STANDARD-OUTPUT* is used.")
 
 (defun highlight-output-record-rectangle (record stream state)
   (with-identity-transformation (stream)
-    (multiple-value-bind (x1 y1 x2 y2)
-        (bounding-rectangle* record)
-      (ecase state
-        (:highlight
-         (draw-rectangle* (sheet-medium stream) (1+ x1) (1+ y1) (1- x2) (1- y2)
-                          :filled nil :ink +foreground-ink+)) ; XXX +FLIPPING-INK+?
-        (:unhighlight
-         (repaint-sheet stream (bounding-rectangle record))
-         ;; Using queue-repaint should be faster in apps (such as
-         ;; clouseau) that highlight/unhighlight many bounding
-         ;; rectangles at once. The event code should merge these into
-         ;; a single larger repaint. Unfortunately, since an enqueued
-         ;; repaint does not occur immediately, and highlight
-         ;; rectangles are not recorded, newer highlighting gets wiped
-         ;; out shortly after being drawn. So, we aren't ready for
-         ;; this yet.  ..Actually, it isn't necessarily
-         ;; faster. Depends on the app.
-         #+ (or)
-	       (queue-repaint stream
-			      (make-instance 'window-repaint-event
-                           :sheet stream
-                           :region (bounding-rectangle record))))))))
+    (ecase state
+      (:highlight
+       ;; We can't "just" draw-rectangle :filled nil because the path lines
+       ;; rounding may get outside the bounding rectangle. -- jd 2019-02-01
+       (multiple-value-bind (x1 y1 x2 y2) (bounding-rectangle* record)
+         (draw-design (sheet-medium stream)
+                      (if (or (> (1+ x1) (1- x2))
+                              (> (1+ y1) (1- y2)))
+                          (bounding-rectangle record)
+                          (region-difference (bounding-rectangle record)
+                                             (make-rectangle* (1+ x1) (1+ y1) (1- x2) (1- y2))))
+                      :ink +foreground-ink+)))
+      (:unhighlight
+       (repaint-sheet stream (bounding-rectangle record))
+       ;; Using queue-repaint should be faster in apps (such as clouseau) that
+       ;; highlight/unhighlight many bounding rectangles at once. The event code
+       ;; should merge these into a single larger repaint. Unfortunately, since
+       ;; an enqueued repaint does not occur immediately, and highlight
+       ;; rectangles are not recorded, newer highlighting gets wiped out shortly
+       ;; after being drawn. So, we aren't ready for this yet.  ..Actually, it
+       ;; isn't necessarily faster. Depends on the app.
+       #+ (or)
+       (queue-repaint stream (make-instance 'window-repaint-event
+                                            :sheet stream
+                                            :region (bounding-rectangle record)))))))
 
 ;;; XXX Should this only be defined on recording streams?
 (defmethod highlight-output-record ((record output-record) stream state)
@@ -1495,10 +1498,10 @@ were added."
       (if filled
           (values min-x min-y max-x max-y)
           (let ((border (graphics-state-line-style-border graphic medium)))
-            (values (- min-x border)
-                    (- min-y border)
-                    (+ max-x border)
-                    (+ max-y border)))))))
+            (values (floor (- min-x border))
+                    (floor (- min-y border))
+                    (ceiling (+ max-x border))
+                    (ceiling (+ max-y border))))))))
 
 (defmethod* (setf output-record-position) :around
     (nx ny (record draw-ellipse-output-record))
@@ -1553,17 +1556,14 @@ were added."
                                   :align-x align-x :align-y align-y
                                   :start start :end end
                                   :text-style text-style)
-      (incf left point-x)
-      (incf top point-y)
-      (incf right point-x)
-      (incf bottom point-y)
-      #+ (or) ;; draw rectangle around text bbox (for testing)
-      (with-drawing-options (medium :line-dashes t :ink +red+)
-        (medium-draw-rectangle* medium left top right bottom nil))
-      (enclosing-transform-polygon transformation (list left top
-                                                        right top
-                                                        left bottom
-                                                        right bottom)))))
+      (if transform-glyphs
+          (enclosing-transform-polygon transformation (list (+ point-x left)  (+ point-y top)
+                                                            (+ point-x right) (+ point-y top)
+                                                            (+ point-x left)  (+ point-y bottom)
+                                                            (+ point-x right) (+ point-y bottom)))
+          (with-transformed-position (transformation point-x point-y)
+            (values (+ point-x left) (+ point-y top)
+                    (+ point-x right) (+ point-y bottom)))))))
 
 (defmethod* (setf output-record-position) :around
   (nx ny (record draw-text-output-record))
@@ -1746,82 +1746,71 @@ were added."
                     (coordinate (+ y1 max-height))))))
   text-record)
 
-(defmethod add-character-output-to-text-record ((text-record standard-text-displayed-output-record)
-                                                character text-style char-width height new-baseline)
-  (with-slots (strings baseline width max-height left right start-y end-x end-y medium)
-      text-record
-    (if (and strings
-             (let ((string (last-elt strings)))
-               (match-output-records string
-                                     :text-style text-style
-                                     :ink (medium-ink medium)
-                                     :clipping-region (medium-clipping-region
-                                                       medium))))
-        (vector-push-extend character (slot-value (last-elt strings) 'string))
-        (nconcf strings
-                (list (make-instance
-                       'styled-string
-                       :start-x end-x
-                       :text-style text-style
-                       :medium medium	; pick up ink and clipping region
-                       :string (make-array 1 :initial-element character
-                                           :element-type 'character
-                                           :adjustable t
-                                           :fill-pointer t)))))
-    (multiple-value-bind (minx miny maxx maxy)
-        (text-bounding-rectangle* medium (string character) :text-style text-style)
-      (declare (ignore miny maxy))
-      (setq baseline (max baseline new-baseline)
-            ;; KLUDGE: note END-X here is really START-X of the new
-            ;; string
-            left (min left (+ end-x minx))
-            end-x (+ end-x char-width)
-            right (+ end-x (max 0 (- maxx char-width)))
-            max-height (max max-height height)
-            end-y (max end-y (+ start-y max-height))
-            width (+ width char-width))))
-  (tree-recompute-extent text-record))
+(defmethod add-character-output-to-text-record
+    ((text-record standard-text-displayed-output-record)
+     character text-style char-width height new-baseline
+     &aux (start 0) (end 1))
+  (add-string-output-to-text-record text-record character
+                                    start end text-style
+                                    char-width height new-baseline))
 
 (defmethod add-string-output-to-text-record ((text-record standard-text-displayed-output-record)
                                              string start end text-style string-width height new-baseline)
-  (setf end (or end (length string)))
+  (setf end (or end (etypecase string
+                      (character 1)
+                      (string (length string)))))
   (let ((length (max 0 (- end start))))
-    (cond
-      ((eql length 1)
-       (add-character-output-to-text-record text-record
-                                            (aref string start)
-                                            text-style
-                                            string-width height new-baseline))
-      (t (with-slots (strings baseline width max-height left right start-y end-x end-y
-                      medium)
-             text-record
-           (let ((styled-string (make-instance
-                                 'styled-string
-                                 :start-x end-x
-                                 :text-style text-style
-                                 :medium medium
-                                 :string (make-array length
-                                                     :element-type 'character
-                                                     :adjustable t
-                                                     :fill-pointer t))))
-             (nconcf strings (list styled-string))
-             (replace (styled-string-string styled-string) string
-                      :start2 start :end2 end))
-           (multiple-value-bind (minx miny maxx maxy)
-               (text-bounding-rectangle* medium string
-                                         :text-style text-style
-                                         :start start :end end)
-             (declare (ignore miny maxy))
-             (setq baseline (max baseline new-baseline)
-                   ;; KLUDGE: note that END-X here really means
-                   ;; START-X of the new string.
-                   left (min left (+ end-x minx))
-                   end-x (+ end-x string-width)
-                   right (+ end-x (max 0 (- maxx string-width)))
-                   max-height (max max-height height)
-                   end-y (max end-y (+ start-y max-height))
-                   width (+ width string-width))))
-         (tree-recompute-extent text-record)))))
+    (with-slots (strings baseline width max-height left right start-y end-x end-y medium)
+        text-record
+      (let* ((strings-last-cons (last strings))
+             (last-string (first strings-last-cons)))
+        (if (and last-string
+                 (match-output-records last-string
+                                       :text-style text-style
+                                       :ink (medium-ink medium)
+                                       :clipping-region (medium-clipping-region medium)))
+            ;; Simply append the string to the last one.
+            (let* ((last-string (styled-string-string last-string))
+                   (last-string-length (length last-string))
+                   (start1 (length last-string))
+                   (end1 (+ start1 length)))
+              (when (< (array-dimension last-string 0) end1)
+                (adjust-array last-string (max end1 (* 2 last-string-length))))
+              (setf (fill-pointer last-string) end1)
+              (etypecase string
+                (character (setf (char last-string (1- end1)) string))
+                (string (replace last-string string
+                                 :start1 start1 :end1 end1
+                                 :start2 start :end2 end))))
+            (let ((styled-string (make-instance
+                                  'styled-string
+                                  :start-x end-x
+                                  :text-style text-style
+                                  :medium medium
+                                  :string (make-array length
+                                                      :element-type 'character
+                                                      :adjustable t
+                                                      :fill-pointer t))))
+              (nconcf strings (list styled-string))
+              (etypecase string
+                (character (setf (char last-string 0) string))
+                (string (replace (styled-string-string styled-string) string
+                                 :start2 start :end2 end))))))
+      (multiple-value-bind (minx miny maxx maxy)
+          (text-bounding-rectangle* medium string
+                                    :text-style text-style
+                                    :start start :end end)
+        (declare (ignore miny maxy))
+        (setq baseline (max baseline new-baseline)
+              ;; KLUDGE: note that END-X here really means
+              ;; START-X of the new string.
+              left (min left (+ end-x minx))
+              end-x (+ end-x string-width)
+              right (+ end-x (max 0 (- maxx string-width)))
+              max-height (max max-height height)
+              end-y (max end-y (+ start-y max-height))
+              width (+ width string-width))))
+    (tree-recompute-extent text-record)))
 
 (defmethod text-displayed-output-record-string
     ((record standard-text-displayed-output-record))
@@ -1864,16 +1853,6 @@ add output recording facilities. It is not instantiable."))
           (slot-value stream 'output-history) history
           (stream-current-output-record stream) history)))
 
-;;; Used in initializing clim-stream-pane
-
-(defgeneric reset-output-history (stream))
-
-(defmethod reset-output-history ((stream
-                                  standard-output-recording-stream))
-  (setf (slot-value stream 'output-history)
-        (make-instance 'standard-tree-output-history :stream stream))
-  (setf (stream-current-output-record stream) (stream-output-history stream)))
-
 ;;; 16.4.1 The Output Recording Stream Protocol
 (defmethod (setf stream-recording-p)
     (recording-p (stream standard-output-recording-stream))
@@ -1910,15 +1889,16 @@ add output recording facilities. It is not instantiable."))
 (defmethod erase-output-record (record (stream standard-output-recording-stream)
                                 &optional (errorp t))
   (with-output-recording-options (stream :record nil)
-    (let ((region (rounded-bounding-rectangle record)))
+    (let ((region (rounded-bounding-rectangle record))
+          (parent (output-record-parent record)))
+      (cond
+        ((output-record-ancestor-p (stream-output-history stream) record)
+         (delete-output-record record parent))
+        (errorp
+         (error "~S is not contained in ~S." record stream)))
       (with-bounding-rectangle* (x1 y1 x2 y2) region
-        (if (output-record-ancestor-p (stream-output-history stream) record)
-            (progn
-              (delete-output-record record (output-record-parent record))
-              (draw-rectangle* stream x1 y1 x2 y2 :ink +background-ink+)
-              (stream-replay stream region))
-            (when errorp
-              (error "~S is not contained in ~S." record stream)))))))
+        (draw-rectangle* stream x1 y1 x2 y2 :ink +background-ink+)
+        (stream-replay stream region)))))
 
 ;;; 16.4.3. Text Output Recording
 (defmethod stream-text-output-record
@@ -2030,10 +2010,14 @@ according to the flags RECORD and DRAW."
   (stream-close-text-output-record stream)
   (let ((new-record (apply #'make-instance record-type initargs)))
     (with-output-recording-options (stream :record t :draw nil)
-      (letf (((stream-current-output-record stream) new-record)
-             ((stream-cursor-position stream) (values 0 0)))
-        (funcall continuation stream new-record)
-        (force-output stream)))
+      (with-temporary-margins (stream :left   '(:absolute 0)
+                                      :top    '(:absolute 0)
+                                      :right  '(:relative 0)
+                                      :bottom '(:relative 0))
+        (letf (((stream-current-output-record stream) new-record)
+               ((stream-cursor-position stream) (values 0 0)))
+          (funcall continuation stream new-record)
+          (force-output stream))))
     new-record))
 
 (defmethod make-design-from-output-record (record)

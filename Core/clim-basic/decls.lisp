@@ -196,6 +196,24 @@
 (defgeneric sheet-occluding-sheets (sheet child))
 (defgeneric map-over-sheets (function sheet))
 
+(defgeneric sheet-name (sheet)
+  (:documentation "McCLIM extension: Return the name of SHEET.
+The returned name is a symbol and does not change.
+For sheets which are also panes, the returned name is identical to the
+pane name.")
+  (:method (sheet) nil))
+(defgeneric sheet-pretty-name (sheet)
+  (:documentation "McCLIM extension: Return the pretty name of SHEET.
+The returned name is a string and may change over time.
+The pretty name usually corresponds to the title of the associated
+window.")
+  (:method (sheet) "(Unnamed sheet)"))
+(defgeneric (setf sheet-pretty-name) (new-value sheet)
+  (:documentation "McCLIM extension: Set SHEET's pretty name to NEW-VALUE.
+NEW-NAME must be a string.
+Changing the pretty name of SHEET usually changes the title of the
+window associated with it."))
+
 ;;; 7.3.1 Sheet Geometry Functions [complete]
 
 (defgeneric sheet-transformation (sheet))
@@ -227,9 +245,9 @@
 
 ;;;; 8.1
 (defgeneric process-next-event (port &key wait-function timeout))
-
 (defgeneric port-keyboard-input-focus (port))
 (defgeneric (setf port-keyboard-input-focus) (focus port))
+(defgeneric distribute-event (port event))
 
 ;;; 8.2 Standard Device Events
 
@@ -455,7 +473,7 @@
 ;; standard-text-cursor [class]
 (defgeneric cursor-sheet (cursor))
 (defgeneric cursor-position (cursor))
-;;(defgeneric (setf* cursor-position) (x y cursor))
+(defgeneric* (setf cursor-position) (x y cursor))
 (defgeneric cursor-active (cursor))
 (defgeneric (setf cursor-active) (value cursor))
 (defgeneric cursor-state (cursor))
@@ -469,7 +487,7 @@
 (defgeneric stream-text-cursor (stream))
 (defgeneric (setf stream-text-cursor) (cursor stream))
 (defgeneric stream-cursor-position (stream))
-;; (defgeneric (setf* stream-cursor-position) (x y stream)) unsure how to declare this, can somebody help? --GB
+(defgeneric* (setf stream-cursor-position) (x y stream))
 (defgeneric stream-set-cursor-position (stream x y)) ; This is actually in 19.3.1 in CLIM 2.2
 (defgeneric stream-increment-cursor-position (stream dx dy))
 
@@ -675,7 +693,7 @@ unspecified. "))
 (defgeneric stream-input-buffer (stream))
 (defgeneric (setf stream-input-buffer) (buffer stream))
 (defgeneric stream-pointer-position (stream &key pointer))
-;; (defgeneric (setf* stream-pointer-position))
+(defgeneric* (setf stream-pointer-position) (x y stream))
 (defgeneric stream-set-input-focus (stream))
 (defgeneric stream-read-gesture
     (stream &key timeout peek-p input-wait-test
@@ -688,6 +706,14 @@ unspecified. "))
 (defgeneric abort-gesture-event (condition))
 (defgeneric accelerator-gesture-event (condition))
 (defgeneric accelerator-gesture-numeric-argument (condition))
+
+;;; 22.5 Pointer Tracking
+
+;; tracking-pointer
+;; dragging-output
+
+(defgeneric drag-output-record
+    (stream output &key repaint erase feedback finish-on-release multiple-window))
 
 
 ;;; 23.5 Context-dependent (Typed) Input
@@ -960,6 +986,12 @@ and `cell-align-y' are as for `formatting-item-list'."))
 (defgeneric note-frame-deiconified (frame-manager frame))
 (defgeneric note-command-enabled (frame-manager frame command-name))
 (defgeneric note-command-disabled (frame-manager frame command-name))
+(defgeneric note-frame-pretty-name-changed (frame-manager frame new-name)
+  (:documentation "McMCLIM extension: Notify client that the pretty
+name of FRAME, managed by FRAME-MANAGER, changed to NEW-NAME.
+FRAME-MANAGER can be NIL if FRAME is not owned by a frame manager at
+the time of the change.")
+  (:method (frame-manager frame new-name)))
 
 (defgeneric frame-manager-notify-user
     (framem message-string &key frame associated-window title

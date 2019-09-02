@@ -735,6 +735,12 @@ might be different from the sheet's native region."
         (port-enable-sheet (port sheet) sheet)
         (port-disable-sheet (port sheet) sheet))))
 
+(defmethod (setf sheet-pretty-name) :after (new-name (sheet mirrored-sheet-mixin))
+  ;; SHEET might not yet have a mirror if this is called e.g. during
+  ;; the pane generation phase of an application frame.
+  (when-let ((mirror (sheet-direct-mirror sheet)))
+    (climb:port-set-mirror-name (port sheet) mirror new-name)))
+
 (defmethod invalidate-cached-transformations ((sheet mirrored-sheet-mixin))
   (with-slots (native-transformation device-transformation) sheet
     (setf ;;native-transformation nil
@@ -747,16 +753,16 @@ might be different from the sheet's native region."
   (with-slots (native-region) sheet
     (unless native-region
       (let ((this-region (transform-region (sheet-native-transformation sheet)
-        				   (sheet-region sheet)))
+                                           (sheet-region sheet)))
             (parent (sheet-parent sheet)))
         (setf native-region
               (if parent
-        	  (region-intersection this-region
-        			       (transform-region
-        				(invert-transformation
-        				 (%sheet-mirror-transformation sheet))
-        				(sheet-native-region parent)))
-        	  this-region))))
+                  (region-intersection this-region
+                                       (transform-region
+                                        (invert-transformation
+                                         (%sheet-mirror-transformation sheet))
+                                        (sheet-native-region parent)))
+                  this-region))))
     native-region))
 
 #+ (or) ;; XXX: is this needed?
@@ -772,6 +778,18 @@ might be different from the sheet's native region."
               (sheet-native-transformation (sheet-parent sheet))
               (sheet-transformation sheet)))))
     native-transformation))
+
+;;; Top-level sheets
+
+(defclass top-level-sheet-mixin ()
+  (;; The NAME slot intentionally uses the same slot name as the NAME
+   ;; in the PANE class so that both collapse into a single effective
+   ;; slot in e.g. the TOP-LEVEL-SHEET-PANE class.
+   (name :initarg :name :reader sheet-name)
+   (%pretty-name :initarg :pretty-name :accessor clime:sheet-pretty-name)))
+
+;;; Unmanaged sheet is not managed by the window manager.
+(defclass unmanaged-sheet-mixin () ())
 
 
 ;;; Sheets as bounding rectangles
@@ -795,28 +813,29 @@ might be different from the sheet's native region."
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; dangerous codes
-;;; postfix: %%% 
+;;; postfix: %%%
 ;;;
 
 ;; used by invoke-with-double-buffering
 (defmacro with-temp-mirror%%% ((mirrored-sheet new-mirror new-native-transformation new-region)
-			       &body body)
-  (let ((ori-native-transformation (gensym "ori-transformation"))
-	(ori-region (gensym "ori-region")))
-    ;; how use gensym in flet?
-    `(flet ((set-native (transform region sheet)
-	      (invalidate-cached-regions sheet)
-	      (invalidate-cached-transformations sheet)
-	      (%%set-sheet-native-transformation transform sheet)
-	      (setf (slot-value sheet 'region) region))
-            ((setf sheet-direct-mirror) (new-mirror sheet)
-              (port-register-mirror (port sheet) sheet new-mirror)))
-       (let ((,ori-native-transformation (sheet-native-transformation ,mirrored-sheet))
-	     (,ori-region (sheet-region ,mirrored-sheet)))
-	 (letf (((sheet-parent ,mirrored-sheet) nil)
-		((sheet-direct-mirror ,mirrored-sheet) ,new-mirror))
-	   (unwind-protect
-		(progn
-		  (set-native ,new-native-transformation ,new-region ,mirrored-sheet)
-		  ,@body)
-	     (set-native ,ori-native-transformation ,ori-region ,mirrored-sheet)))))))
+                               &body body)
+  (alexandria:once-only (mirrored-sheet new-mirror new-native-transformation new-region)
+    (alexandria:with-gensyms (port old-native-transformation old-region set-native)
+      `(let ((,port (port sheet))
+             (,old-native-transformation (sheet-native-transformation ,mirrored-sheet))
+             (,old-region (sheet-region ,mirrored-sheet)))
+         (flet ((,set-native (transform region sheet)
+                  (invalidate-cached-regions sheet)
+                  (invalidate-cached-transformations sheet)
+                  (%%set-sheet-native-transformation transform sheet)
+                  (setf (slot-value sheet 'region) region))
+                ((setf sheet-direct-mirror) (new-mirror sheet)
+                  (port-register-mirror ,port sheet new-mirror)))
+           (letf (((sheet-parent ,mirrored-sheet) nil)
+                  ((sheet-direct-mirror ,mirrored-sheet) ,new-mirror))
+             (unwind-protect
+                  (progn
+                    (,set-native ,new-native-transformation ,new-region ,mirrored-sheet)
+                    ,@body)
+               (,set-native ,old-native-transformation ,old-region ,mirrored-sheet)
+               (port-unregister-mirror ,port ,mirrored-sheet ,new-mirror))))))))

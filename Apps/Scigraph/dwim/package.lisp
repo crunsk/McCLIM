@@ -41,7 +41,8 @@ advised of the possiblity of such damages.
                 #:frame-manager
                 #:find-frame-manager
                 #:suggest
-                #:expression)
+                #:expression
+                #:accept)
   (:shadow #:interactive-stream-p
 
            #:menu-choose
@@ -54,7 +55,6 @@ advised of the possiblity of such damages.
            #:bounding-rectangle*
            #:redisplay
            #:redisplayable-format
-           #:accept
            #:accepting-values
            #:accept-values
            #:accept-variable-values
@@ -107,7 +107,6 @@ advised of the possiblity of such damages.
            #:stream-viewport-size
 
            #:stream-pointer-position*
-           #:pointer-input-rectangle*
            #:make-application-frame
            #:window-set-viewport-position*
            #:launch-frame
@@ -162,7 +161,6 @@ advised of the possiblity of such damages.
            #:bounding-rectangle*
            #:redisplay
            #:redisplayable-format
-           #:accept
            #:accepting-values
            #:accept-values
            #:accept-variable-values
@@ -217,7 +215,6 @@ advised of the possiblity of such damages.
 
            #:stream-pointer-position*
            #:stream-set-pointer-position*
-           #:pointer-input-rectangle*
            #:make-application-frame
            #:window-set-viewport-position*
            #:launch-frame
